@@ -12,7 +12,7 @@ from flask_login import (
 
 authbp = Blueprint("authbp", __name__)
 
-# Create the LoginManager here; app_v2.py will init it
+# Create the LoginManager here; app_v3.py will init it
 login_manager = LoginManager()
 login_required = _fl_login_required  # re-export so existing imports keep working
 
@@ -46,21 +46,22 @@ def login():
         remember = bool(request.form.get("remember"))
 
         db = get_db()
+        # fetch active flag too
         row = db.execute(
-            "SELECT id, username, password_hash, is_admin FROM users WHERE username=?",
+            "SELECT id, username, password_hash, is_admin, active FROM users WHERE username=?",
             (username,)
         ).fetchone()
 
-        # Legacy SHA-256 check (matches your current DB contents)
         if row and row["password_hash"] == sha256(password.encode()).hexdigest():
+            if int(row["active"] or 0) != 1:
+                flash("This account is inactive. Contact an admin.", "error")
+                return redirect(url_for("authbp.login"))
+
             user = User(row["id"], row["username"], row["is_admin"])
             login_user(user, remember=remember)
-
-            # Bridge for blueprints still using session (routes_admin.before_request)
             session["user_id"] = int(user.id)
             session["username"] = user.username
             session["is_admin"] = 1 if user.is_admin else 0
-
             return redirect(request.args.get("next") or url_for("todaybp.today"))
 
         flash("Invalid credentials", "error")

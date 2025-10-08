@@ -1,4 +1,4 @@
-# app_v2.py
+# app_v3.py
 from flask import Flask, redirect, url_for
 from jinja2 import DictLoader
 from datetime import timedelta
@@ -12,6 +12,7 @@ from routes_today import todaybp
 from routes_history import historybp
 from routes_admin import adminbp
 from routes_account import accountbp
+from routes_carpools import carpoolsbp
 
 
 def create_app():
@@ -56,6 +57,12 @@ def create_app():
     app.register_blueprint(todaybp)
     app.register_blueprint(historybp)
     app.register_blueprint(adminbp)
+    app.register_blueprint(carpoolsbp)
+
+    with app.app_context():
+        # Run migrations once on startup to avoid per-request races
+        _ = get_db()
+        close_db(None)
 
     # Root
     @app.route("/")
@@ -73,4 +80,4 @@ def create_app():
 if __name__ == "__main__":
     app = create_app()
     print("Carpool v2 modular app starting…")
-    app.run(debug=True, host="0.0.0.0", port=5002)
+    app.run(debug=True, use_reloader=False, host="0.0.0.0", port=5000)

@@ -23,7 +23,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 # Import your app + db utilities
-from app_v2 import create_app
+from app_v3 import create_app
 from db import get_db, close_db
 
 def with_app_context(fn):
@@ -138,7 +138,7 @@ def cmd_vacuum(args):
     print("VACUUM done")
 
 def main():
-    p = argparse.ArgumentParser(prog="manage.py", description="CESpool maintenance CLI")
+    p = argparse.ArgumentParser(prog="manage.py", description="NP_pool maintenance CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("stats", help="Show DB path, tables, and row counts").set_defaults(func=cmd_stats)

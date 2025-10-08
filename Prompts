@@ -1,0 +1,17 @@
+Currently this app is hardcoded for a single carpool with exactly 3 users, Christian, Eric, and Sean.  Most pages are hard coded with those names.
+
+I would like to reconstruct it, such that multiple carpools could be used.
+So an Admin would create new carpoll, give it a name, create users for it.
+
+Users would login to the app, select the carpool they are interacting with.
+They can belong to more than one, and they should have a single sign on for all of them.
+The credits and stats related to a carpool should remain distinct from other carpools.
+
+The files included are app_v3.py   (uploaded)
+np_Data.db
+db.py
+routes_acounts.py
+routes_admin.py
+routes_history.py
+routes_today.py
+templates.py

@@ -35,3 +35,4 @@ htmlcov/
 *.data
 *.db
 data.db
+np_data.db

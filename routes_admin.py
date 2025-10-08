@@ -77,27 +77,40 @@ def admin_users():
         from hashlib import sha256
         pw_hash = sha256(password.encode()).hexdigest()
 
+        active = 1 if request.form.get("active") else 0
+
         if action == "add":
             db.execute(
-                "INSERT OR REPLACE INTO users(username, password_hash, is_admin) VALUES (?,?,?)",
-                (username, pw_hash, is_admin),
+                "INSERT OR REPLACE INTO users(username, password_hash, is_admin, active) VALUES (?,?,?,?)",
+                (username, pw_hash, is_admin, active),
             )
             db.commit()
             flash(f"User '{username}' saved.", "info")
+
         elif action == "reset":
             db.execute(
-                "UPDATE users SET password_hash=?, is_admin=? WHERE username=?",
-                (pw_hash, is_admin, username),
+                "UPDATE users SET password_hash=?, is_admin=?, active=? WHERE username=?",
+                (pw_hash, is_admin, active, username),
             )
             db.commit()
             flash(f"User '{username}' updated.", "info")
+
+        elif action == "toggle_active":
+            # quick toggle by id
+            uid = int(request.form.get("user_id") or 0)
+            row = db.execute("SELECT active FROM users WHERE id=?", (uid,)).fetchone()
+            if row is not None:
+                new_active = 0 if int(row["active"] or 0) == 1 else 1
+                db.execute("UPDATE users SET active=? WHERE id=?", (new_active, uid))
+                db.commit()
+            return redirect(url_for("adminbp.admin_users"))
         else:
             flash("Unknown action.", "error")
 
         return redirect(url_for("adminbp.admin_users"))
 
     users = db.execute(
-        "SELECT id, username, is_admin FROM users ORDER BY username"
+        "SELECT id, username, is_admin, active FROM users ORDER BY username"
     ).fetchall()
 
     tmpl = """
