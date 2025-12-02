@@ -153,6 +153,34 @@ def suggest_driver(db, selected_day: date, roles_today: dict, *, multi: bool, ci
             return w
     return sorted(candidates, key=lambda x: str(x))[0] if candidates else None
 
+@todaybp.route("/switch", methods=["POST"])
+@login_required
+def switch():
+    db = get_db()
+    uid = session.get("user_id")
+    cid_post = request.form.get("carpool_id")
+    print(f"DEBUG: Switch requested. Form: {request.form}")
+    print(f"DEBUG: cid_post type: {type(cid_post)}, value: {cid_post}")
+    
+    # Verify membership
+    row = db.execute("""
+        SELECT c.id, c.name
+        FROM carpools c
+        JOIN carpool_memberships cm ON cm.carpool_id=c.id
+        WHERE c.id=? AND cm.user_id=? AND cm.active=1
+    """, (cid_post, uid)).fetchone()
+    
+    if row:
+        session["carpool_id"] = int(row["id"])
+        session["carpool_name"] = row["name"]
+        print(f"DEBUG: Switch success. New CID in session: {session['carpool_id']} (type: {type(session['carpool_id'])})")
+        flash(f"Switched to {row['name']}.")
+    else:
+        print(f"DEBUG: Switch failed. CID {cid_post} not found or inactive for user {uid}.")
+        flash(f"Invalid carpool selection.", "error")
+        
+    return redirect(url_for("todaybp.today"))
+
 @todaybp.route("/")
 @login_required
 def root():
@@ -170,38 +198,30 @@ def today():
         or date.today().isoformat()
     )
 
-    # Inline carpool picker
-    carpool_options = []
-    if multi:
-        carpool_options = db.execute("""
+    cid = session.get("carpool_id") if multi else None
+    print(f"DEBUG: Today route start. Session CID: {cid} (type: {type(cid)})")
+    if multi and not cid:
+        # Auto-select first if available, else show empty state
+        first = db.execute("""
             SELECT c.id, c.name
             FROM carpools c
             JOIN carpool_memberships cm ON cm.carpool_id=c.id
             WHERE cm.user_id=? AND cm.active=1
-            ORDER BY c.name
-        """, (uid,)).fetchall()
-
-        if request.method == "POST" and request.form.get("action") == "switch_carpool":
-            cid_post = request.form.get("carpool_id")
-            if cid_post and any(int(cid_post) == r["id"] for r in carpool_options):
-                row = next(r for r in carpool_options if r["id"] == int(cid_post))
-                session["carpool_id"] = int(row["id"])
-                session["carpool_name"] = row["name"]
-                flash(f"Switched to {row['name']}.")
-            else:
-                flash("Invalid carpool.", "error")
-            return redirect(url_for("todaybp.today", day=selected_day.isoformat()))
-
-    cid = session.get("carpool_id") if multi else None
-    if multi and not cid:
-        return render_template_string(
-            TODAY_TMPL,
-            selected_day=selected_day.isoformat(),
-            members=[], roles={}, credits={},
-            suggestion_name=None, driver_is_explicit=False,
-            can_edit=False, no_carpool=True,
-            multi=multi, carpool_options=carpool_options
-        )
+            ORDER BY c.name LIMIT 1
+        """, (uid,)).fetchone()
+        if first:
+            session["carpool_id"] = int(first["id"])
+            session["carpool_name"] = first["name"]
+            cid = int(first["id"])
+        else:
+            return render_template_string(
+                TODAY_TMPL,
+                selected_day=selected_day.isoformat(),
+                members=[], roles={}, credits={},
+                suggestion_name=None, driver_is_explicit=False,
+                can_edit=False, no_carpool=True,
+                multi=multi, carpool_options=[]
+            )
 
     # Members + today's roles
     if multi:
@@ -259,17 +279,31 @@ def today():
 
         if multi:
             for user_id, role in writes:
+                # Fetch the actual member_key from carpool_memberships
+                mk_row = db.execute(
+                    "SELECT member_key FROM carpool_memberships WHERE carpool_id=? AND user_id=?",
+                    (cid, user_id)
+                ).fetchone()
+                
+                if mk_row and mk_row["member_key"]:
+                    member_key = mk_row["member_key"]
+                else:
+                    member_key = f"u{user_id}"
+                    print(f"WARNING: No member_key found for user {user_id} in carpool {cid}, using fallback: {member_key}")
+                
+                print(f"DEBUG: Inserting entry for user {user_id} with member_key '{member_key}'")
                 db.execute(
                     """
-                    INSERT INTO entries(carpool_id, day, user_id, role, update_user, update_ts, update_date)
-                    VALUES(?,?,?,?,?,CURRENT_TIMESTAMP, DATE('now'))
+                    INSERT INTO entries(carpool_id, day, user_id, member_key, role, update_user, update_ts, update_date)
+                    VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP, DATE('now'))
                     ON CONFLICT(carpool_id, day, user_id) DO UPDATE SET
                       role=excluded.role,
+                      member_key=excluded.member_key,
                       update_user=excluded.update_user,
                       update_ts=CURRENT_TIMESTAMP,
                       update_date=DATE('now')
                     """,
-                    (cid, selected_day.isoformat(), user_id, role, session.get('username', 'unknown'))
+                    (cid, selected_day.isoformat(), user_id, member_key, role, session.get('username', 'unknown'))
                 )
         else:
             for member_key, role in writes:
@@ -337,6 +371,18 @@ def today():
     else:
         members_ctx = [{"key": m["member_key"], "name": m["display_name"]} for m in members]
 
+    # Fetch options for navbar
+    carpool_options = []
+    if multi:
+        carpool_options = db.execute("""
+            SELECT c.id, c.name
+            FROM carpools c
+            JOIN carpool_memberships cm ON cm.carpool_id=c.id
+            WHERE cm.user_id=? AND cm.active=1
+            ORDER BY c.name
+        """, (uid,)).fetchall()
+
+    print(f"DEBUG: Today route end. Rendering with CID: {cid}, Session CID: {session.get('carpool_id')}")
     return render_template_string(
         TODAY_TMPL,
         selected_day=selected_day.isoformat(),

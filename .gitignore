@@ -32,7 +32,40 @@ eggs/
 coverage.xml
 htmlcov/
 
-*.data
+# -------------------------
+# Database files
+# -------------------------
 *.db
+*.db-shm
+*.db-wal
 data.db
 np_data.db
+
+# -------------------------
+# Test/Debug/Utility Scripts
+# (Keep only essential app files)
+# -------------------------
+activate_users.py
+check_*.py
+debug_*.py
+fix_*.py
+full_db_check.py
+init_sample_db.py
+inspect_*.py
+reproduce_*.py
+verify_*.py
+manage.py
+reset_admin.py
+migrate_remove_unique_constraint.py
+
+# -------------------------
+# Misc
+# -------------------------
+Prompts
+prompt.md
+*.data
+
+# -------------------------
+# Antigravity artifacts
+# -------------------------
+.gemini/

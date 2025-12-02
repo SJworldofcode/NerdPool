@@ -7,6 +7,7 @@ from collections import defaultdict
 from db import get_db
 from auth import login_required
 from templates import BASE_TMPL
+from template_helpers import get_navbar_context
 
 accountbp = Blueprint("accountbp", __name__)
 
@@ -53,7 +54,8 @@ def _get_carpool_mprs(db, user_id):
         return []
     rows = db.execute("""
         SELECT c.id, c.name,
-               COALESCE(ucp.miles_per_ride, 36.0) AS mpr
+               COALESCE(ucp.miles_per_ride, 36.0) AS mpr,
+               ucp.avg_mpg
         FROM carpool_memberships cm
         JOIN carpools c ON c.id = cm.carpool_id
         LEFT JOIN user_carpool_prefs ucp
@@ -61,7 +63,7 @@ def _get_carpool_mprs(db, user_id):
         WHERE cm.user_id=? AND cm.active=1
         ORDER BY c.name
     """, (user_id,)).fetchall()
-    return [{"id": r["id"], "name": r["name"], "mpr": float(r["mpr"])} for r in rows]
+    return [{"id": r["id"], "name": r["name"], "mpr": float(r["mpr"]), "mpg": (float(r["avg_mpg"]) if r["avg_mpg"] is not None else None)} for r in rows]
 
 def _save_global_prefs(db, user_id, gas_price, avg_mpg, legacy_mpr=None):
     # Keep miles_per_ride only for legacy mode
@@ -84,15 +86,33 @@ def _save_global_prefs(db, user_id, gas_price, avg_mpg, legacy_mpr=None):
         """, (user_id, gas_price, avg_mpg, legacy_mpr))
     db.commit()
 
-def _save_mprs(db, user_id, mpr_map):
+def _save_mprs(db, user_id, mpr_map, mpg_map):
     # mpr_map: { carpool_id -> miles_per_ride }
-    for cid, mpr in mpr_map.items():
+    # mpg_map: { carpool_id -> avg_mpg }
+    all_cids = set(mpr_map.keys()) | set(mpg_map.keys())
+    for cid in all_cids:
+        mpr = mpr_map.get(cid)
+        mpg = mpg_map.get(cid)
+        
+        # We need to handle partial updates carefully or just upsert.
+        # Since we might not have both values, we check what's currently there or just rely on UPSERT logic if we assume full form submission.
+        # But simpler: just UPSERT with COALESCE if we want, or just update what we have.
+        # However, SQLite UPSERT is easiest if we provide all values or use dynamic SQL.
+        # Let's do a read-modify-write or just assume the form sends current values for everything.
+        # Actually, the form will send values for all rows.
+        
+        if mpr is None: mpr = 36.0 # fallback if missing from form? shouldn't happen
+        
+        # If mpg is None (empty string in form), we might want to set it to NULL in DB to inherit global?
+        # Let's say if user clears it, it becomes NULL.
+        
         db.execute("""
-            INSERT INTO user_carpool_prefs(user_id, carpool_id, miles_per_ride)
-            VALUES (?, ?, ?)
+            INSERT INTO user_carpool_prefs(user_id, carpool_id, miles_per_ride, avg_mpg)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(user_id, carpool_id) DO UPDATE SET
-              miles_per_ride=excluded.miles_per_ride
-        """, (user_id, cid, mpr))
+              miles_per_ride=excluded.miles_per_ride,
+              avg_mpg=excluded.avg_mpg
+        """, (user_id, cid, mpr, mpg))
     db.commit()
 
 def _count_rides_by_carpool(db, user_id):
@@ -193,6 +213,7 @@ def account():
     # Save per-carpool MPRs
     if request.method == "POST" and request.form.get("action") == "save_mprs":
         mpr_map = {}
+        mpg_map = {}
         for k, v in request.form.items():
             if k.startswith("mpr_"):
                 try:
@@ -200,9 +221,17 @@ def account():
                     mpr_map[cid] = float(v or "36")
                 except Exception:
                     continue
-        if mpr_map:
-            _save_mprs(db, user_id, mpr_map)
-            flash("Miles per ride updated.")
+            if k.startswith("mpg_"):
+                try:
+                    cid = int(k.split("_", 1)[1])
+                    val = v.strip()
+                    mpg_map[cid] = float(val) if val else None
+                except Exception:
+                    continue
+        
+        if mpr_map or mpg_map:
+            _save_mprs(db, user_id, mpr_map, mpg_map)
+            flash("Carpool settings updated.")
         return redirect(url_for("accountbp.account"))
 
     # Load prefs
@@ -212,16 +241,25 @@ def account():
     # Compute rides per carpool with the new rule, then miles & savings
     rides_by_cid = _count_rides_by_carpool(db, user_id)
     total_miles = 0.0
+    gallons = 0.0
     # multi-carpool
     for r in carpool_mprs:
         rid = rides_by_cid.get(r["id"], 0)
-        total_miles += rid * r["mpr"]
+        miles = rid * r["mpr"]
+        total_miles += miles
+        
+        # Use carpool-specific MPG if set, else global avg_mpg
+        c_mpg = r["mpg"] if r["mpg"] is not None else avg_mpg
+        if c_mpg:
+            gallons += miles / c_mpg
     # legacy fallback
     if not carpool_mprs:
         rid = rides_by_cid.get("legacy", 0)
-        total_miles += rid * legacy_mpr
+        miles = rid * legacy_mpr
+        total_miles += miles
+        if avg_mpg:
+            gallons += miles / avg_mpg
 
-    gallons = (total_miles / avg_mpg) if avg_mpg else 0.0
     gas_savings = gallons * gas_price
 
     # Template
@@ -273,6 +311,12 @@ def account():
                       <input class="form-control" name="mpr_{{ r.id }}" value="{{ r.mpr }}" inputmode="decimal" required>
                     </td>
                   </tr>
+                  <tr>
+                    <td class="muted" style="text-align:right; padding-right:10px;">↳ MPG (optional)</td>
+                    <td>
+                      <input class="form-control" name="mpg_{{ r.id }}" value="{{ r.mpg or '' }}" placeholder="Global: {{ avg_mpg }}" inputmode="decimal">
+                    </td>
+                  </tr>
                 {% endfor %}
                 {% if not carpool_mprs %}
                   <tr><td colspan="2" class="muted">You aren't in any carpools yet.</td></tr>
@@ -320,4 +364,5 @@ def account():
         gas_price=gas_price, avg_mpg=avg_mpg, legacy_mpr=legacy_mpr,
         carpool_mprs=carpool_mprs,
         total_miles=total_miles, gas_savings=gas_savings,
+        **get_navbar_context()
     )

@@ -102,24 +102,26 @@ BASE_TMPL = r"""
     <div class="brand">NerdPool</div>
   </div>
   <div class="nav-links" id="navLinks">
-    <a class="btn btn-sm" href="{{ url_for('todaybp.today') }}">Today</a>
-    <a class="btn btn-sm" href="{{ url_for('historybp.history') }}">History</a>
+    {% if carpool_options and carpool_options|length > 1 %}
+      <form method="post" action="{{ url_for('todaybp.switch') }}" style="display:inline;">
+        <select name="carpool_id" onchange="this.form.submit()" class="form-select" style="width:auto; padding:5px 28px 5px 10px; font-size:.92rem; height:34px; display:inline-block; cursor:pointer;">
+             {% for opt in carpool_options %}
+               <option value="{{ opt['id'] }}" {{ 'selected' if session.get('carpool_id') == opt['id'] else '' }}>{{ opt['name'] }}</option>
+             {% endfor %}
+        </select>
+      </form>
+    {% endif %}
+
+    <a class="btn btn-sm" href="{{ url_for('todaybp.today') }}">Schedule</a>
+    {% if not is_admin %}
+      <a class="btn btn-sm" href="{{ url_for('historybp.history') }}">History</a>
+    {% endif %}
     {% if is_admin %}
-      <a class="btn btn-sm" href="{{ url_for('adminbp.admin_users') }}">Admin</a>
-      <a class="btn btn-sm" href="{{ url_for('carpoolsbp.admin') }}">Pools</a>
-      <a class="btn btn-sm" href="{{ url_for('carpoolsbp.memberships') }}">Memberships</a>
-      <a class="btn btn-sm" href="{{ url_for('adminbp.admin_audit') }}">Audit</a>
-      <a class="btn btn-sm" href="{{ url_for('adminbp.admin_diag') }}">Diag</a>
+      <a class="btn btn-sm" href="{{ url_for('adminbp.admin_dashboard') }}">Admin</a>
     {% endif %}
-    {% if session.get('carpool_name') %}
-      <span class="pill">NerdPool: <strong>{{ session.get('carpool_name') }}</strong></span>
-    {% endif %}
-    <a class="btn btn-sm" href="{{ url_for('carpoolsbp.pick') }}">Switch</a>
-    <a class="btn btn-sm" href="{{ url_for('accountbp.account') }}">Account</a>
-    {% if session.get('username') %}
-      <span class="pill">{{ session.get('username') }}</span>
-      <a class="btn btn-sm btn-secondary" href="{{ url_for('authbp.logout') }}">Logout</a>
-    {% endif %}
+
+    <a class="btn btn-sm" href="{{ url_for('accountbp.account') }}">Account{% if session.get('username') %} ({{ session.get('username') }}){% endif %}</a>
+    <a class="btn btn-sm btn-secondary" href="{{ url_for('authbp.logout') }}">Logout</a>
   </div>
 </div>
 
@@ -204,24 +206,16 @@ TODAY_TMPL = r"""
 {% extends "BASE_TMPL" %}{% block content %}
   <div class="grid">
     <div class="card">
-      <!-- NerdPool selector (only if multi mode) -->
-      {% if multi %}
-        <form method="post" class="form-row" style="align-items:end; margin-bottom:10px;">
-          <input type="hidden" name="action" value="switch_carpool">
-          <input type="hidden" name="day" value="{{ selected_day }}">
-          <div style="min-width:220px;">
-            <label class="form-label">NerdPool</label>
-            <select class="form-select" name="carpool_id" onchange="this.form.submit()">
-              {% for opt in carpool_options %}
-                <option value="{{ opt['id'] }}" {{ 'selected' if session.get('carpool_id') == opt['id'] else '' }}>
-                  {{ opt['name'] }}
-                </option>
-              {% endfor %}
-            </select>
-          </div>
-          <noscript><button class="btn btn-primary" style="margin-left:8px;">Switch</button></noscript>
-        </form>
+      <!-- Carpool Context Header -->
+      {% if session.get('carpool_name') %}
+        <div style="margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
+          <div class="muted" style="font-size: .9rem;">Displaying data for</div>
+          <div style="font-size: 1.1rem; font-weight: 600; color: var(--accent);">{{ session.get('carpool_name') }}</div>
+        </div>
       {% endif %}
+
+      <!-- NerdPool selector (only if multi mode) -->
+      <!-- NerdPool selector moved to Navbar -->
 
       <!-- Tips lives UNDER the selector 
       <div class="card" style="background:#12141a; margin-bottom:10px;">
@@ -239,8 +233,8 @@ TODAY_TMPL = r"""
         <input type="hidden" name="action" value="save_roles">
         <div class="form-row" style="align-items:end;">
           <div style="min-width:180px;">
-            <label class="form-label">Day</label>
-            <input class="form-control" type="date" name="day" value="{{ selected_day }}">
+            <label class="form-label">Select Date</label>
+            <input class="form-control" type="date" name="day" value="{{ selected_day }}" pattern=r"\d{4}-\d{2}-\d{2}">
           </div>
           <div>
             {% if can_edit %}

@@ -11,6 +11,7 @@ from flask import (
 
 from db import get_db
 from auth import login_required
+from template_helpers import get_navbar_context
 
 adminbp = Blueprint("adminbp", __name__)
 
@@ -33,6 +34,10 @@ def _day_to_date(val) -> date:
         pass
     return date.today()
 
+def _has_table(db, name: str) -> bool:
+    """Check if a table exists in the database."""
+    return db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
+
 
 # --- Admin guard for this blueprint -------------------------------------------
 @adminbp.before_request
@@ -48,6 +53,41 @@ def _require_admin():
         abort(403)
 
 
+# --- Admin Dashboard -----------------------------------------------------------
+@adminbp.route("/admin")
+@login_required
+def admin_dashboard():
+    tmpl = """
+    {% extends 'BASE_TMPL' %}{% block content %}
+      <h3>Admin Dashboard</h3>
+      <div class="grid grid-2">
+        <a class="card" href="{{ url_for('adminbp.admin_users') }}" style="text-decoration:none; color:inherit;">
+          <h5>Users</h5>
+          <div class="muted">Manage users, reset passwords, toggle admin status.</div>
+        </a>
+        <a class="card" href="{{ url_for('carpoolsbp.admin') }}" style="text-decoration:none; color:inherit;">
+          <h5>Pools</h5>
+          <div class="muted">Create and manage carpools.</div>
+        </a>
+        <a class="card" href="{{ url_for('carpoolsbp.memberships') }}" style="text-decoration:none; color:inherit;">
+          <h5>Memberships</h5>
+          <div class="muted">Manage user memberships in carpools.</div>
+        </a>
+        <a class="card" href="{{ url_for('adminbp.admin_audit') }}" style="text-decoration:none; color:inherit;">
+          <h5>Audit</h5>
+          <div class="muted">View audit logs of all changes.</div>
+        </a>
+        <a class="card" href="{{ url_for('adminbp.admin_diag') }}" style="text-decoration:none; color:inherit;">
+          <h5>Diagnostics</h5>
+          <div class="muted">View system stats and database info.</div>
+        </a>
+      </div>
+    {% endblock %}
+    """
+    from templates import BASE_TMPL
+    return render_template_string(tmpl, BASE_TMPL=BASE_TMPL, **get_navbar_context())
+
+
 # --- Users management ----------------------------------------------------------
 @adminbp.route("/admin/users", methods=["GET", "POST"])
 @login_required
@@ -61,42 +101,54 @@ def admin_users():
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
-        username = (request.form.get("username") or "").strip()
-
-        if not username:
-            flash("Username is required.", "error")
-            return redirect(url_for("adminbp.admin_users"))
-
-        is_admin = 1 if request.form.get("is_admin") else 0
-        password = request.form.get("password") or ""
-
-        if not password:
-            flash("Password is required.", "error")
-            return redirect(url_for("adminbp.admin_users"))
-
-        from hashlib import sha256
-        pw_hash = sha256(password.encode()).hexdigest()
-
-        active = 1 if request.form.get("active") else 0
-
+        
         if action == "add":
-            db.execute(
-                "INSERT OR REPLACE INTO users(username, password_hash, is_admin, active) VALUES (?,?,?,?)",
-                (username, pw_hash, is_admin, active),
-            )
-            db.commit()
-            flash(f"User '{username}' saved.", "info")
+            username = (request.form.get("username") or "").strip()
+            if not username:
+                flash("Username required.", "error")
+                return redirect(url_for("adminbp.admin_users"))
+            
+            password = (request.form.get("password") or "").strip()
+            if not password:
+                flash("Password required.", "error")
+                return redirect(url_for("adminbp.admin_users"))
+
+            is_admin = 1 if request.form.get("is_admin") else 0
+            active = 1 if request.form.get("active") else 0
+            
+            from hashlib import sha256
+            pw_hash = sha256(password.encode()).hexdigest()
+            
+            try:
+                db.execute(
+                    "INSERT INTO users(username, password_hash, is_admin, active) VALUES (?,?,?,?)",
+                    (username, pw_hash, is_admin, active),
+                )
+                db.commit()
+                flash(f"User '{username}' created.", "info")
+            except Exception as e:
+                flash(f"Error creating user: {e}", "error")
 
         elif action == "reset":
+            username = (request.form.get("username") or "").strip()
+            password = (request.form.get("password") or "").strip()
+            is_admin = 1 if request.form.get("is_admin") else 0
+            
+            if not username or not password:
+                flash("Username and Password required for reset.", "error")
+                return redirect(url_for("adminbp.admin_users"))
+
+            from hashlib import sha256
+            pw_hash = sha256(password.encode()).hexdigest()
+            
             db.execute(
-                "UPDATE users SET password_hash=?, is_admin=?, active=? WHERE username=?",
-                (pw_hash, is_admin, active, username),
+                "UPDATE users SET password_hash=?, is_admin=? WHERE username=?",
+                (pw_hash, is_admin, username),
             )
             db.commit()
             flash(f"User '{username}' updated.", "info")
 
         elif action == "toggle_active":
-            # quick toggle by id
             uid = int(request.form.get("user_id") or 0)
             row = db.execute("SELECT active FROM users WHERE id=?", (uid,)).fetchone()
             if row is not None:
@@ -104,6 +156,24 @@ def admin_users():
                 db.execute("UPDATE users SET active=? WHERE id=?", (new_active, uid))
                 db.commit()
             return redirect(url_for("adminbp.admin_users"))
+
+        elif action == "delete":
+            uid = int(request.form.get("user_id") or 0)
+            print(f"DEBUG: Attempting to delete user {uid}")
+            if uid == session.get("user_id"):
+                print("DEBUG: Cannot delete self")
+                flash("Cannot delete yourself.", "error")
+            else:
+                print("DEBUG: Deleting user...")
+                db.execute("DELETE FROM user_prefs WHERE user_id=?", (uid,))
+                db.execute("DELETE FROM user_carpool_prefs WHERE user_id=?", (uid,))
+                db.execute("DELETE FROM carpool_memberships WHERE user_id=?", (uid,))
+                db.execute("DELETE FROM entries WHERE user_id=?", (uid,))
+                db.execute("DELETE FROM users WHERE id=?", (uid,))
+                db.commit()
+                flash("User deleted.", "info")
+            return redirect(url_for("adminbp.admin_users"))
+
         else:
             flash("Unknown action.", "error")
 
@@ -174,12 +244,19 @@ def admin_users():
       <br>
 
       <table class="table table-sm">
-        <thead><tr><th>User</th><th>Admin</th></tr></thead>
+        <thead><tr><th>User</th><th>Admin</th><th>Actions</th></tr></thead>
         <tbody>
           {% for u in users %}
             <tr>
               <td>{{ u['username'] }}</td>
               <td>{{ 'Yes' if u['is_admin'] else 'No' }}</td>
+              <td>
+                <form method="post" style="display:inline;" onsubmit="return confirm('Delete user {{ u['username'] }}? This cannot be undone.');">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="user_id" value="{{ u['id'] }}">
+                  <button class="btn btn-sm btn-danger" style="padding:2px 6px; font-size:0.8rem;">Del</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
           {% if not users %}
@@ -190,28 +267,44 @@ def admin_users():
     {% endblock %}
     """
     from templates import BASE_TMPL
-    return render_template_string(tmpl, users=users, BASE_TMPL=BASE_TMPL)
+    return render_template_string(tmpl, users=users, BASE_TMPL=BASE_TMPL, **get_navbar_context())
 
 
 # --- Audit view ----------------------------------------------------------------
-@adminbp.route("/admin/audit")
+@adminbp.route("/admin/audit", methods=["GET", "POST"])
 @login_required
 def admin_audit():
     db = get_db()
+
+    # Handle delete action
+    if request.method == "POST" and request.form.get("action") == "delete":
+        entry_id = int(request.form.get("entry_id") or 0)
+        if entry_id:
+            db.execute("DELETE FROM entries WHERE id=?", (entry_id,))
+            db.commit()
+            flash("Entry deleted.", "info")
+        return redirect(url_for("adminbp.admin_audit"))
 
     # Query params
     q = (request.args.get("q") or "").strip()
     member = (request.args.get("member") or "").strip().upper()
     role = (request.args.get("role") or "").strip().upper()
+    carpool_filter = (request.args.get("carpool") or "").strip()
     start = (request.args.get("start") or "").strip()  # YYYY-MM-DD
     end   = (request.args.get("end") or "").strip()    # YYYY-MM-DD
 
+    # Get all carpools for filter dropdown
+    carpools = db.execute("SELECT id, name FROM carpools ORDER BY name").fetchall() if _has_table(db, "carpools") else []
+
     rows = db.execute("""
-        SELECT day, member_key, role,
-               COALESCE(update_user,'') AS update_user,
-               COALESCE(update_date,'') AS update_date,
-               COALESCE(update_ts,'')   AS update_ts
-        FROM entries
+        SELECT e.id, e.day, e.member_key, e.role,
+               COALESCE(e.update_user,'') AS update_user,
+               COALESCE(e.update_date,'') AS update_date,
+               COALESCE(e.update_ts,'')   AS update_ts,
+               e.carpool_id,
+               c.name AS carpool_name
+        FROM entries e
+        LEFT JOIN carpools c ON c.id = e.carpool_id
     """).fetchall()
 
     # Convert + filter in Python (supports non-ISO day formats)
@@ -225,12 +318,14 @@ def admin_audit():
             continue
         if role in ("D", "R", "O") and r["role"] != role:
             continue
+        if carpool_filter and str(r["carpool_id"]) != carpool_filter:
+            continue
         if start_d and d < start_d:
             continue
         if end_d and d > end_d:
             continue
         if q:
-            blob = f"{r['day']} {r['member_key']} {r['role']} {r['update_user']} {r['update_date']} {r['update_ts']}"
+            blob = f"{r['day']} {r['member_key']} {r['role']} {r['update_user']} {r['update_date']} {r['update_ts']} {r['carpool_name'] or ''}"
             if q.lower() not in blob.lower():
                 continue
         out.append(r)
@@ -251,6 +346,15 @@ def admin_audit():
 
       <form class="row g-2 align-items-end mb-3" method="get">
         <div class="col-auto">
+          <label class="form-label">Carpool</label>
+          <select name="carpool" class="form-select">
+            <option value="">(all)</option>
+            {% for cp in carpools %}
+              <option value="{{ cp['id'] }}" {{ 'selected' if request.args.get('carpool')==cp['id']|string else '' }}>{{ cp['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-auto">
           <label class="form-label">Member</label>
           <select name="member" class="form-select">
             <option value="">(all)</option>
@@ -270,11 +374,11 @@ def admin_audit():
         </div>
         <div class="col-auto">
           <label class="form-label">From</label>
-          <input class="form-control" type="date" name="start" value="{{ request.args.get('start','') }}">
+          <input class="form-control" type="date" name="start" value="{{ request.args.get('start','') }}" pattern=r"\d{4}-\d{2}-\d{2}">
         </div>
         <div class="col-auto">
           <label class="form-label">To</label>
-          <input class="form-control" type="date" name="end" value="{{ request.args.get('end','') }}">
+          <input class="form-control" type="date" name="end" value="{{ request.args.get('end','') }}" pattern=r"\d{4}-\d{2}-\d{2}">
         </div>
         <div class="col-auto">
           <label class="form-label">Search</label>
@@ -291,26 +395,36 @@ def admin_audit():
           <thead>
             <tr>
               <th>Day</th>
+              <th>Carpool</th>
               <th>Member</th>
               <th>Role</th>
               <th>Update User</th>
               <th>Update Date</th>
-              <th>Update Timestamp</th>
+              <th>Timestamp</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {% for r in rows %}
               <tr>
                 <td>{{ r['day'] }}</td>
+                <td>{{ r['carpool_name'] or '(legacy)' }}</td>
                 <td>{{ r['member_key'] }}</td>
-                <td>{{ 'Driver' if r['role']=='D' else 'Rider' if r['role']=='R' else 'Off' }}</td>
+                <td>{{ r['role'] }}</td>
                 <td>{{ r['update_user'] }}</td>
                 <td>{{ r['update_date'] }}</td>
-                <td><code>{{ r['update_ts'] }}</code></td>
+                <td class="muted">{{ r['update_ts'] }}</td>
+                <td>
+                  <form method="post" style="display:inline;" onsubmit="return confirm('Delete this entry?');">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="entry_id" value="{{ r['id'] }}">
+                    <button class="btn btn-sm btn-danger" style="padding:2px 6px; font-size:0.8rem;">Del</button>
+                  </form>
+                </td>
               </tr>
             {% endfor %}
             {% if not rows %}
-              <tr><td colspan="6" class="text-center text-muted">No results</td></tr>
+              <tr><td colspan="8" class="text-center text-muted">No audit entries found.</td></tr>
             {% endif %}
           </tbody>
         </table>
@@ -318,7 +432,7 @@ def admin_audit():
     {% endblock %}
     """
     from templates import BASE_TMPL
-    return render_template_string(tmpl, rows=out, BASE_TMPL=BASE_TMPL)
+    return render_template_string(tmpl, rows=out, carpools=carpools, BASE_TMPL=BASE_TMPL, **get_navbar_context())
 
 
 # --- Diagnostics ---------------------------------------------------------------
@@ -431,4 +545,5 @@ def admin_diag():
         mtime_fmt=fmt_ts(mtime), n_entries=n_entries, n_days=n_days,
         min_day=min_day, max_day=max_day, per_year=per_year,
         newest=newest, oldest=oldest,
+        **get_navbar_context()
     )

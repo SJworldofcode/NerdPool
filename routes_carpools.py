@@ -2,6 +2,7 @@
 from flask import Blueprint, render_template_string, request, redirect, url_for, session, flash, abort
 from auth import login_required
 from db import get_db
+from template_helpers import get_navbar_context
 
 carpoolsbp = Blueprint("carpoolsbp", __name__, url_prefix="/carpools")
 
@@ -69,7 +70,7 @@ def pick():
     {% endblock %}
     """
     from templates import BASE_TMPL
-    return render_template_string(tmpl, BASE_TMPL=BASE_TMPL, has_multi=has_multi, options=options)
+    return render_template_string(tmpl, BASE_TMPL=BASE_TMPL, has_multi=has_multi, options=options, **get_navbar_context())
 
 @carpoolsbp.route("/clear")
 @login_required
@@ -86,35 +87,52 @@ def admin():
     db = get_db()
     # Create carpool
     if request.method == "POST":
+        action = request.form.get("action")
         name = (request.form.get("name") or "").strip()
-        if not name:
-            flash("Name required.", "error")
+        
+        if action == "add":
+            if not name:
+                flash("Name required.", "error")
+                return redirect(url_for("carpoolsbp.admin"))
+            
+            db.execute("CREATE TABLE IF NOT EXISTS carpools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)")
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS carpool_memberships (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  carpool_id INTEGER NOT NULL,
+                  user_id    INTEGER NOT NULL,
+                  member_key TEXT NOT NULL,
+                  display_name TEXT NOT NULL,
+                  active INTEGER NOT NULL DEFAULT 1,
+                  UNIQUE(carpool_id, member_key),
+                  UNIQUE(carpool_id, user_id),
+                  FOREIGN KEY(carpool_id) REFERENCES carpools(id) ON DELETE CASCADE,
+                  FOREIGN KEY(user_id)    REFERENCES users(id)    ON DELETE CASCADE
+                )
+            """)
+            db.execute("INSERT OR IGNORE INTO carpools(name) VALUES (?)", (name,))
+            db.commit()
+            flash(f"Carpool '{name}' created.", "info")
             return redirect(url_for("carpoolsbp.admin"))
-        db.execute("CREATE TABLE IF NOT EXISTS carpools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)")
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS carpool_memberships (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              carpool_id INTEGER NOT NULL,
-              user_id    INTEGER NOT NULL,
-              member_key TEXT NOT NULL,
-              display_name TEXT NOT NULL,
-              active INTEGER NOT NULL DEFAULT 1,
-              UNIQUE(carpool_id, member_key),
-              UNIQUE(carpool_id, user_id),
-              FOREIGN KEY(carpool_id) REFERENCES carpools(id) ON DELETE CASCADE,
-              FOREIGN KEY(user_id)    REFERENCES users(id)    ON DELETE CASCADE
-            )
-        """)
-        db.execute("INSERT OR IGNORE INTO carpools(name) VALUES (?)", (name,))
-        db.commit()
-        flash(f"Carpool '{name}' created.", "info")
-        return redirect(url_for("carpoolsbp.admin"))
+
+        elif action == "delete":
+            cid = int(request.form.get("carpool_id") or 0)
+            print(f"DEBUG: Attempting to delete carpool {cid}")
+            # Cascade delete
+            db.execute("DELETE FROM user_carpool_prefs WHERE carpool_id=?", (cid,))
+            db.execute("DELETE FROM carpool_memberships WHERE carpool_id=?", (cid,))
+            db.execute("DELETE FROM entries WHERE carpool_id=?", (cid,))
+            db.execute("DELETE FROM carpools WHERE id=?", (cid,))
+            db.commit()
+            flash("Carpool deleted.", "info")
+            return redirect(url_for("carpoolsbp.admin"))
 
     rows = db.execute("SELECT id, name FROM carpools ORDER BY name").fetchall() if _has_table(db,"carpools") else []
     tmpl = """
     {% extends "BASE_TMPL" %}{% block content %}
       <h3>NerdPools</h3>
       <form method="post" class="card mb-3">
+        <input type="hidden" name="action" value="add">
         <div class="row gy-2 align-items-end">
           <div class="col-auto">
             <label class="form-label">Name
@@ -127,12 +145,26 @@ def admin():
           </div>
         </div>
       </form>
-      <table class="table table-sm"><thead><tr><th>ID</th><th>Name</th></tr></thead>
-      <tbody>{% for r in rows %}<tr><td>{{ r['id'] }}</td><td>{{ r['name'] }}</td></tr>{% endfor %}</tbody></table>
+      <table class="table table-sm"><thead><tr><th>ID</th><th>Name</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r['id'] }}</td>
+            <td>{{ r['name'] }}</td>
+            <td>
+              <form method="post" style="display:inline;" onsubmit="return confirm('Delete carpool {{ r['name'] }}? This cannot be undone.');">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="carpool_id" value="{{ r['id'] }}">
+                <button class="btn btn-sm btn-danger" style="padding:2px 6px; font-size:0.8rem;">Del</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody></table>
     {% endblock %}
     """
     from templates import BASE_TMPL
-    return render_template_string(tmpl, BASE_TMPL=BASE_TMPL, rows=rows)
+    return render_template_string(tmpl, BASE_TMPL=BASE_TMPL, rows=rows, **get_navbar_context())
 
 @carpoolsbp.route("/memberships", methods=["GET","POST"])
 @login_required
@@ -168,7 +200,7 @@ def memberships():
             flash("All fields required.", "error")
             return redirect(url_for("carpoolsbp.memberships"))
 
-        u = db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        u = db.execute("SELECT id FROM users WHERE LOWER(username)=LOWER(?)", (username,)).fetchone()
         if not u:
             flash("User not found. Create user under Admin > Users.", "error")
             return redirect(url_for("carpoolsbp.memberships"))
@@ -239,4 +271,4 @@ def memberships():
     {% endblock %}
     """
     from templates import BASE_TMPL
-    return render_template_string(tmpl, BASE_TMPL=BASE_TMPL, carpools=carpools, users=users, memberships=memberships)
+    return render_template_string(tmpl, BASE_TMPL=BASE_TMPL, carpools=carpools, users=users, memberships=memberships, **get_navbar_context())

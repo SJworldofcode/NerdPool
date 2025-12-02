@@ -24,10 +24,10 @@ def create_app():
 
     # Cookie hardening + remember-me persistence
     app.config.update(
-        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_SECURE=False,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        REMEMBER_COOKIE_SECURE=True,
+        REMEMBER_COOKIE_SECURE=False,
         REMEMBER_COOKIE_HTTPONLY=True,
         REMEMBER_COOKIE_SAMESITE="Lax",
         REMEMBER_COOKIE_DURATION=timedelta(days=30),

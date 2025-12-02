@@ -88,18 +88,37 @@ def history():
             "roles": {who: role_map.get(who, "R") for who, _label in headers}
         })
 
+    carpool_options = []
+    if multi:
+        uid = session.get("user_id")
+        carpool_options = db.execute("""
+            SELECT c.id, c.name
+            FROM carpools c
+            JOIN carpool_memberships cm ON cm.carpool_id=c.id
+            WHERE cm.user_id=? AND cm.active=1
+            ORDER BY c.name
+        """, (uid,)).fetchall()
+
     tmpl = """
     {% extends "BASE_TMPL" %}{% block content %}
       <h3>History</h3>
+      
+      <!-- Carpool Context -->
+      {% if session.get('carpool_name') %}
+        <div style="margin-bottom: 14px; padding: 10px; background: var(--panel); border-radius: 10px; border: 1px solid var(--border);">
+          <span class="muted" style="font-size: .9rem;">Displaying data for:</span>
+          <strong style="color: var(--accent); margin-left: 6px;">{{ session.get('carpool_name') }}</strong>
+        </div>
+      {% endif %}
 
       <form class="row g-2 align-items-end mb-3" method="get">
         <div class="col-auto">
           <label class="form-label">From</label>
-          <input class="form-control" type="date" name="start" value="{{ request.args.get('start','') }}">
+          <input class="form-control" type="date" name="start" value="{{ request.args.get('start','') }}" pattern=r"\d{4}-\d{2}-\d{2}">
         </div>
         <div class="col-auto">
           <label class="form-label">To</label>
-          <input class="form-control" type="date" name="end" value="{{ request.args.get('end','') }}">
+          <input class="form-control" type="date" name="end" value="{{ request.args.get('end','') }}" pattern=r"\d{4}-\d{2}-\d{2}">
         </div>
         <div class="col-auto">
           <button class="btn btn-primary">Filter</button>
@@ -143,7 +162,8 @@ def history():
         BASE_TMPL=BASE_TMPL,
         headers=headers,
         rows=out_rows,
-        multi=multi
+        multi=multi,
+        carpool_options=carpool_options
     )
 
 @historybp.route("/stats/<who>")

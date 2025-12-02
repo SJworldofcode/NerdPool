@@ -51,6 +51,7 @@ def get_db():
         _migrate_v3_prefs(g.db)  # NEW: per-user prefs for miles/gas/mpg
         _migrate_v3_multicarpool(g.db)
         _migrate_v4_user_carpool_prefs(g.db)
+        _migrate_v5_mpg_per_carpool(g.db)
     return g.db
 
 def _ensure_schema(db: sqlite3.Connection):
@@ -202,6 +203,15 @@ def _migrate_v4_user_carpool_prefs(db):
         FROM carpool_memberships cm
     """)
     db.commit()
+
+def _migrate_v5_mpg_per_carpool(db):
+    """
+    Add avg_mpg to user_carpool_prefs.
+    """
+    cols = {r["name"] for r in db.execute("PRAGMA table_info(user_carpool_prefs)").fetchall()}
+    if "avg_mpg" not in cols:
+        db.execute("ALTER TABLE user_carpool_prefs ADD COLUMN avg_mpg REAL")
+
 
 
 
