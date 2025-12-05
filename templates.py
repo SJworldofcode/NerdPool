@@ -237,7 +237,8 @@ TODAY_TMPL = r"""
             <label class="form-label">Select Date</label>
             <input class="form-control" type="date" name="day" id="dayInput" value="{{ selected_day }}" pattern=r"\d{4}-\d{2}-\d{2}">
           </div>
-          <div>
+          <div style="display:none;">
+            <!-- Go button hidden - auto-reload works. Remove display:none to re-enable -->
             <button type="button" class="btn btn-secondary" onclick="var d = document.getElementById('dayInput').value; console.log('Go clicked, date:', d); window.location.href='/today?day=' + d;">Go</button>
           </div>
           <div>
