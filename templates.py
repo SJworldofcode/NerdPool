@@ -228,13 +228,17 @@ TODAY_TMPL = r"""
         </div>
       </div> -->
 
+
       <!-- Roles form -->
-      <form method="post" class="grid" style="gap: 10px;">
+      <form method="post" class="grid" style="gap: 10px;" id="rolesForm">
         <input type="hidden" name="action" value="save_roles">
         <div class="form-row" style="align-items:end;">
           <div style="min-width:180px;">
             <label class="form-label">Select Date</label>
-            <input class="form-control" type="date" name="day" value="{{ selected_day }}" pattern=r"\d{4}-\d{2}-\d{2}">
+            <input class="form-control" type="date" name="day" id="dayInput" value="{{ selected_day }}" pattern=r"\d{4}-\d{2}-\d{2}">
+          </div>
+          <div>
+            <button type="button" class="btn btn-secondary" onclick="var d = document.getElementById('dayInput').value; console.log('Go clicked, date:', d); window.location.href='/today?day=' + d;">Go</button>
           </div>
           <div>
             {% if can_edit %}
@@ -243,6 +247,15 @@ TODAY_TMPL = r"""
               <button class="btn" disabled title="Edits older than 7 days require admin">Save (locked)</button>
             {% endif %}
           </div>
+        </div>
+
+        <script>
+          // Auto-reload when date changes
+          document.getElementById('dayInput').addEventListener('change', function() {
+            console.log('Date changed to:', this.value);
+            window.location.href = '/today?day=' + this.value;
+          });
+        </script>
           {% if no_carpool %}
             <span class="badge" title="Fewer than two active">No NerdPool Today</span>
           {% endif %}

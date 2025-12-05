@@ -51,14 +51,16 @@ def _is_multi_mode(db) -> bool:
         and bool(session.get("user_id"))
     )
 
-# ------------ CREDIT RULE (updated) ------------
-def compute_credits_all(rows, who_field: str = "who"):
+# ------------ CREDIT RULE (matching CESpool exactly) ------------
+def compute_credits_all(rows, who_field: str = "who", cutoff_date: date = None):
     """
-    Credits only for days <= today AND having at least one Driver.
+    Credits calculation matching CESpool's exact logic:
       Driver: +1 per Rider that day
-      Rider:  -1  (only if there is a Driver that day)
+      Rider:  -1 (even if no driver - this is CESpool's behavior)
       Off:     0
+    Skips days only if NO drivers AND NO riders (everyone is Off).
     rows = [{'day':..., 'who':..., 'role':...}]
+    cutoff_date: if provided, excludes days > cutoff_date
     """
     credits = defaultdict(int)
     by_day = defaultdict(dict)
@@ -67,15 +69,18 @@ def compute_credits_all(rows, who_field: str = "who"):
         who = e[who_field]
         by_day[d][who] = e["role"]
 
-    today = date.today()
     for d in sorted(by_day.keys()):
-        if d > today:
-            continue  # exclude future days
+        if cutoff_date is not None and d > cutoff_date:
+            continue
         roles = by_day[d]
         drivers = [w for w, r in roles.items() if r == "D"]
-        if not drivers:
-            continue  # exclude days with no driver
         riders = [w for w, r in roles.items() if r == "R"]
+        
+        # Skip only if BOTH no drivers AND no riders (everyone is Off)
+        # This matches CESpool's logic exactly
+        if not drivers and not riders:
+            continue
+            
         for drv in drivers:
             credits[drv] += len(riders)
         for r in riders:
@@ -323,7 +328,9 @@ def today():
         flash("Saved.")
         return redirect(url_for("todaybp.today", day=selected_day.isoformat()))
 
-    # Credits (past/today, only days with a driver)
+    # Credits calculation
+    # - For past/future dates: show credits BEFORE that day (matches CESpool)
+    # - For TODAY: include today's entries so changes are reflected immediately
     if multi:
         rows_prev = db.execute(
             "SELECT day, user_id AS who, role FROM entries WHERE carpool_id=?",
@@ -331,8 +338,18 @@ def today():
         ).fetchall()
     else:
         rows_prev = db.execute("SELECT day, member_key AS who, role FROM entries").fetchall()
-    rows_prev = [r for r in rows_prev if day_to_date(r["day"]) < selected_day or selected_day <= date.today()]
-    credits = compute_credits_all(rows_prev, who_field="who")
+    
+    # Credits calculation:
+    # - For TODAY: include today's entries (real-time updates)
+    # - For past/future: exclude selected day (matches CESpool)
+    if selected_day == date.today():
+        # Include today so credits update as you save roles
+        rows_prev = [r for r in rows_prev if day_to_date(r["day"]) <= selected_day]
+    else:
+        # Exclude selected day - shows balance "entering" that day (matches CESpool)
+        rows_prev = [r for r in rows_prev if day_to_date(r["day"]) < selected_day]
+    
+    credits = compute_credits_all(rows_prev, who_field="who", cutoff_date=None)
 
     active = [k for k, v in roles_form.items() if v != "O"]
     no_carpool_day = len(active) < 2

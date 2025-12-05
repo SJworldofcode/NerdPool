@@ -24,12 +24,8 @@ USER_MAPPING = {
     "SJ": "sean"
 }
 
-# Default passwords (CHANGE THESE IN PRODUCTION!)
-DEFAULT_PASSWORDS = {
-    "christian": "change-me-christian",
-    "eric": "change-me-eric",
-    "sean": "change-me-sean"
-}
+# Default password for all users
+DEFAULT_PASSWORD = "pass"
 
 def create_fresh_database():
     """Create a fresh np_data.db with v3 schema."""
@@ -94,21 +90,32 @@ def create_fresh_database():
     return conn
 
 def create_users(conn):
-    """Create the three users."""
+    """Create admin user and the three carpool users."""
     print("\nCreating users...")
     user_ids = {}
+    password_hash = sha256(DEFAULT_PASSWORD.encode()).hexdigest()
     
+    # Create admin user (no carpool memberships)
+    cursor = conn.execute("""
+        INSERT INTO users(username, password_hash, is_admin, active)
+        VALUES (?, ?, 1, 1)
+    """, ("admin", password_hash))
+    admin_id = cursor.lastrowid
+    print(f"  ✓ Created admin user 'admin' (ID: {admin_id}) with password '{DEFAULT_PASSWORD}'")
+    
+    # Create carpool users
     for key, username in USER_MAPPING.items():
-        password = DEFAULT_PASSWORDS.get(username, "change-me")
-        password_hash = sha256(password.encode()).hexdigest()
+        # Sean gets admin privileges, others don't
+        is_admin = 1 if username == "sean" else 0
         
         cursor = conn.execute("""
             INSERT INTO users(username, password_hash, is_admin, active)
-            VALUES (?, ?, 1, 1)
-        """, (username, password_hash))
+            VALUES (?, ?, ?, 1)
+        """, (username, password_hash, is_admin))
         
         user_ids[key] = cursor.lastrowid
-        print(f"  ✓ Created user '{username}' (ID: {user_ids[key]}) with password '{password}'")
+        admin_str = " (admin)" if is_admin else ""
+        print(f"  ✓ Created user '{username}' (ID: {user_ids[key]}){admin_str} with password '{DEFAULT_PASSWORD}'")
     
     conn.commit()
     return user_ids
@@ -209,13 +216,16 @@ def main():
     print("✓ MIGRATION COMPLETE!")
     print("=" * 60)
     print(f"\nSummary:")
-    print(f"  - Created {len(user_ids)} users")
+    print(f"  - Created {len(user_ids) + 1} users (admin + carpool members)")
     print(f"  - Created 1 carpool: {TARGET_POOL_NAME}")
     print(f"  - Migrated {entry_count} entries")
     print(f"\n⚠️  IMPORTANT: Change the default passwords!")
-    print(f"  Current passwords are:")
-    for username, password in DEFAULT_PASSWORDS.items():
-        print(f"    - {username}: {password}")
+    print(f"  All users have password: '{DEFAULT_PASSWORD}'")
+    print(f"  Users created:")
+    print(f"    - admin (admin, no carpool memberships)")
+    print(f"    - sean (admin, CESpool member)")
+    print(f"    - christian (CESpool member)")
+    print(f"    - eric (CESpool member)")
 
 if __name__ == "__main__":
     main()

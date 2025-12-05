@@ -57,6 +57,10 @@ verify_*.py
 manage.py
 reset_admin.py
 migrate_remove_unique_constraint.py
+CESPOOL_routes_today.py
+credit_sanity_check.py
+make_admin.py
+test_cespool_logic.py
 
 # -------------------------
 # Misc
