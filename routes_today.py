@@ -49,7 +49,7 @@ def _is_multi_mode(db) -> bool:
         _has_table(db, "carpool_memberships")
         and _has_column(db, "entries", "carpool_id")
         and _has_column(db, "entries", "user_id")
-        and bool(session.get("user_id"))
+        and current_user.is_authenticated
     )
 
 # ------------ CREDIT RULE (matching CESpool exactly) ------------
@@ -163,7 +163,7 @@ def suggest_driver(db, selected_day: date, roles_today: dict, *, multi: bool, ci
 @login_required
 def switch():
     db = get_db()
-    uid = session.get("user_id")
+    uid = int(current_user.id)
     cid_post = request.form.get("carpool_id")
     print(f"DEBUG: Switch requested. Form: {request.form}")
     print(f"DEBUG: cid_post type: {type(cid_post)}, value: {cid_post}")
@@ -197,7 +197,7 @@ def root():
 def today():
     db = get_db()
     multi = _is_multi_mode(db)
-    uid = session.get("user_id")
+    uid = int(current_user.id)
 
     selected_day = parse_day(
         (request.args.get("day") if request.method == "GET" else request.form.get("day"))
