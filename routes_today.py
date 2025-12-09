@@ -1,5 +1,6 @@
 # routes_today.py
 from flask import Blueprint, request, render_template_string, redirect, url_for, session, flash
+from flask_login import current_user
 from datetime import date, datetime, timedelta
 from collections import defaultdict
 
