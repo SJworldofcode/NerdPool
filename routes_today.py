@@ -55,37 +55,52 @@ def _is_multi_mode(db) -> bool:
 # ------------ CREDIT RULE (matching CESpool exactly) ------------
 def compute_credits_all(rows, who_field: str = "who", cutoff_date: date = None):
     """
-    Credits calculation matching CESpool's exact logic:
-      Driver: +1 per Rider that day
-      Rider:  -1 (even if no driver - this is CESpool's behavior)
-      Off:     0
-    Skips days only if NO drivers AND NO riders (everyone is Off).
+    Credits calculation rules:
+      - ONLY days with exactly 1 driver are counted.
+      - Driver: +1 per Rider
+      - Rider:  -1
+      - Off:     0
+      - Future days (relative to calendar today) are IGNORED.
     rows = [{'day':..., 'who':..., 'role':...}]
-    cutoff_date: if provided, excludes days > cutoff_date
+    cutoff_date: if provided, excludes days > cutoff_date (applied *after* today check)
     """
     credits = defaultdict(int)
     by_day = defaultdict(dict)
+    today_limit = date.today()
+    print(f"DEBUG: compute_credits_all start. today_limit={today_limit}, cutoff={cutoff_date}")
+
     for e in rows:
         d = day_to_date(e["day"])
         who = e[who_field]
         by_day[d][who] = e["role"]
 
     for d in sorted(by_day.keys()):
-        if cutoff_date is not None and d > cutoff_date:
+        # Rule: Only past days and today (calendar today).
+        # Future dates should not change credits.
+        if d > today_limit:
+            print(f"DEBUG: Skipping day {d} because > today_limit {today_limit}")
             continue
+
+        if cutoff_date is not None and d > cutoff_date:
+            print(f"DEBUG: Skipping day {d} because > cutoff_date {cutoff_date}")
+            continue
+
         roles = by_day[d]
         drivers = [w for w, r in roles.items() if r == "D"]
         riders = [w for w, r in roles.items() if r == "R"]
         
-        # Skip only if BOTH no drivers AND no riders (everyone is Off)
-        # This matches CESpool's logic exactly
-        if not drivers and not riders:
+        # Rule: ONLY days with exactly 1 driver will be used to calc credits.
+        if len(drivers) != 1:
+            print(f"DEBUG: Skipping day {d} because drivers count {len(drivers)} != 1")
             continue
             
+        print(f"DEBUG: Processing day {d}. Drivers: {drivers}, Riders: {riders}")
         for drv in drivers:
             credits[drv] += len(riders)
         for r in riders:
             credits[r] -= 1
+            
+    print(f"DEBUG: Final credits: {dict(credits)}")
     return dict(credits)
 # ----------------------------------------------
 
@@ -173,7 +188,7 @@ def switch():
         SELECT c.id, c.name
         FROM carpools c
         JOIN carpool_memberships cm ON cm.carpool_id=c.id
-        WHERE c.id=? AND cm.user_id=? AND cm.active=1
+        WHERE c.id=? AND cm.user_id=? AND cm.active=1 AND c.active=1
     """, (cid_post, uid)).fetchone()
     
     if row:
@@ -212,7 +227,7 @@ def today():
             SELECT c.id, c.name
             FROM carpools c
             JOIN carpool_memberships cm ON cm.carpool_id=c.id
-            WHERE cm.user_id=? AND cm.active=1
+            WHERE cm.user_id=? AND cm.active=1 AND c.active=1
             ORDER BY c.name LIMIT 1
         """, (uid,)).fetchone()
         if first:
@@ -264,14 +279,18 @@ def today():
     # Save roles
     if request.method == "POST" and request.form.get("action") == "save_roles":
         if not can_edit:
+            print(f"DEBUG: Save rejected. can_edit={can_edit}")
             flash("Editing locked for days older than 7 days (admin only).", "error")
             return redirect(url_for("todaybp.today", day=selected_day.isoformat()))
 
+        print(f"DEBUG: save_roles POST form: {request.form}")
         if multi:
             posted = {}
             for m in members:
                 field = f"u{m['user_id']}"
-                posted[m["user_id"]] = request.form.get(field, "R")
+                val = request.form.get(field, "R")
+                print(f"DEBUG: Field {field} -> {val}")
+                posted[m["user_id"]] = val
         else:
             posted = {m["member_key"]: request.form.get(m["member_key"], "R") for m in members}
 
@@ -341,16 +360,14 @@ def today():
         rows_prev = db.execute("SELECT day, member_key AS who, role FROM entries").fetchall()
     
     # Credits calculation:
-    # - For TODAY: include today's entries (real-time updates)
-    # - For past/future: exclude selected day (matches CESpool)
-    if selected_day == date.today():
-        # Include today so credits update as you save roles
-        rows_prev = [r for r in rows_prev if day_to_date(r["day"]) <= selected_day]
-    else:
-        # Exclude selected day - shows balance "entering" that day (matches CESpool)
-        rows_prev = [r for r in rows_prev if day_to_date(r["day"]) < selected_day]
+    # - Always include the selected day so the user sees the effect of their changes immediately.
+    # - compute_credits_all will internally filter out any days > date.today() (calendar future),
+    #   ensuring future plans don't affect the balance.
+    print(f"DEBUG: Processing credits for view day {selected_day}. Total rows fetched: {len(rows_prev)}")
+    rows_filtered = [r for r in rows_prev if day_to_date(r["day"]) <= selected_day]
+    print(f"DEBUG: Rows after filtering <= {selected_day}: {len(rows_filtered)}")
     
-    credits = compute_credits_all(rows_prev, who_field="who", cutoff_date=None)
+    credits = compute_credits_all(rows_filtered, who_field="who", cutoff_date=None)
 
     active = [k for k, v in roles_form.items() if v != "O"]
     no_carpool_day = len(active) < 2
@@ -396,7 +413,7 @@ def today():
             SELECT c.id, c.name
             FROM carpools c
             JOIN carpool_memberships cm ON cm.carpool_id=c.id
-            WHERE cm.user_id=? AND cm.active=1
+            WHERE cm.user_id=? AND cm.active=1 AND c.active=1
             ORDER BY c.name
         """, (uid,)).fetchall()
 

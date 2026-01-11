@@ -374,11 +374,11 @@ def admin_audit():
         </div>
         <div class="col-auto">
           <label class="form-label">From</label>
-          <input class="form-control" type="date" name="start" value="{{ request.args.get('start','') }}" pattern=r"\d{4}-\d{2}-\d{2}">
+          <input class="form-control" type="date" name="start" value="{{ request.args.get('start','') }}" pattern="\d{4}-\d{2}-\d{2}">
         </div>
         <div class="col-auto">
           <label class="form-label">To</label>
-          <input class="form-control" type="date" name="end" value="{{ request.args.get('end','') }}" pattern=r"\d{4}-\d{2}-\d{2}">
+          <input class="form-control" type="date" name="end" value="{{ request.args.get('end','') }}" pattern="\d{4}-\d{2}-\d{2}">
         </div>
         <div class="col-auto">
           <label class="form-label">Search</label>

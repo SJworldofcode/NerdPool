@@ -27,7 +27,7 @@ def pick():
             SELECT c.id, c.name
             FROM carpool_memberships cm
             JOIN carpools c ON c.id = cm.carpool_id
-            WHERE cm.user_id = ? AND cm.active = 1
+            WHERE cm.user_id = ? AND cm.active = 1 AND c.active = 1
             ORDER BY c.name
         """, (user_id,)).fetchall()
         options = [{"id": r["id"], "name": r["name"]} for r in rows]
@@ -95,7 +95,7 @@ def admin():
                 flash("Name required.", "error")
                 return redirect(url_for("carpoolsbp.admin"))
             
-            db.execute("CREATE TABLE IF NOT EXISTS carpools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS carpools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, active INTEGER NOT NULL DEFAULT 1)")
             db.execute("""
                 CREATE TABLE IF NOT EXISTS carpool_memberships (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,9 +110,19 @@ def admin():
                   FOREIGN KEY(user_id)    REFERENCES users(id)    ON DELETE CASCADE
                 )
             """)
-            db.execute("INSERT OR IGNORE INTO carpools(name) VALUES (?)", (name,))
+            db.execute("INSERT OR IGNORE INTO carpools(name, active) VALUES (?, 1)", (name,))
             db.commit()
             flash(f"Carpool '{name}' created.", "info")
+            return redirect(url_for("carpoolsbp.admin"))
+            
+        elif action == "toggle_active":
+            cid = int(request.form.get("carpool_id") or 0)
+            row = db.execute("SELECT active FROM carpools WHERE id=?", (cid,)).fetchone()
+            if row:
+                new_val = 0 if row["active"] else 1
+                db.execute("UPDATE carpools SET active=? WHERE id=?", (new_val, cid))
+                db.commit()
+                flash("Carpool status updated.", "info")
             return redirect(url_for("carpoolsbp.admin"))
 
         elif action == "delete":
@@ -127,14 +137,14 @@ def admin():
             flash("Carpool deleted.", "info")
             return redirect(url_for("carpoolsbp.admin"))
 
-    rows = db.execute("SELECT id, name FROM carpools ORDER BY name").fetchall() if _has_table(db,"carpools") else []
+    rows = db.execute("SELECT id, name, active FROM carpools ORDER BY name").fetchall() if _has_table(db,"carpools") else []
     tmpl = """
     {% extends "BASE_TMPL" %}{% block content %}
       <h3>NerdPools</h3>
       <form method="post" class="card mb-3">
         <input type="hidden" name="action" value="add">
         <div class="row gy-2 align-items-end">
-          <div class="col-auto">
+                  <div class="col-auto">
             <label class="form-label">Name
               <input class="form-control" name="name" placeholder="Team A" required>
             </label>
@@ -145,13 +155,25 @@ def admin():
           </div>
         </div>
       </form>
-      <table class="table table-sm"><thead><tr><th>ID</th><th>Name</th><th>Actions</th></tr></thead>
+      <table class="table table-sm"><thead><tr><th>ID</th><th>Name</th><th>Active</th><th>Actions</th></tr></thead>
       <tbody>
         {% for r in rows %}
           <tr>
             <td>{{ r['id'] }}</td>
             <td>{{ r['name'] }}</td>
             <td>
+                <span class="badge" style="background: {{ 'var(--ok)' if r['active'] else 'var(--danger)' }}; color: #fff;">
+                    {{ 'Yes' if r['active'] else 'No' }}
+                </span>
+            </td>
+            <td>
+              <form method="post" style="display:inline;">
+                <input type="hidden" name="action" value="toggle_active">
+                <input type="hidden" name="carpool_id" value="{{ r['id'] }}">
+                <button class="btn btn-sm btn-secondary" style="padding:2px 6px; font-size:0.8rem;">
+                    {{ 'Deactivate' if r['active'] else 'Activate' }}
+                </button>
+              </form>
               <form method="post" style="display:inline;" onsubmit="return confirm('Delete carpool {{ r['name'] }}? This cannot be undone.');">
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="carpool_id" value="{{ r['id'] }}">
@@ -173,7 +195,7 @@ def memberships():
     db = get_db()
 
     # Ensure tables
-    db.execute("CREATE TABLE IF NOT EXISTS carpools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS carpools (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, active INTEGER NOT NULL DEFAULT 1)")
     db.execute("""
         CREATE TABLE IF NOT EXISTS carpool_memberships (
           id INTEGER PRIMARY KEY AUTOINCREMENT,

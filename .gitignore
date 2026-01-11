@@ -61,6 +61,11 @@ CESPOOL_routes_today.py
 credit_sanity_check.py
 make_admin.py
 test_cespool_logic.py
+test_*.py
+*_test.py
+schema_checker.py
+my_manual_test.py
+migrate_add_active_to_carpools.py
 
 # -------------------------
 # Misc
