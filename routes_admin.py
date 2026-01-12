@@ -205,6 +205,10 @@ def admin_users():
             <input class="form-check-input" type='checkbox' name='is_admin' id="add_admin">
             <label class="form-check-label" for="add_admin">Admin</label>
           </div>
+          <div class="col-auto form-check mt-4">
+            <input class="form-check-input" type='checkbox' name='active' id="add_active" checked>
+            <label class="form-check-label" for="add_active">Active</label>
+          </div>
           <div class="col-auto">
             <button class="btn btn-primary">Save</button>
           </div>
@@ -244,13 +248,25 @@ def admin_users():
       <br>
 
       <table class="table table-sm">
-        <thead><tr><th>User</th><th>Admin</th><th>Actions</th></tr></thead>
+        <thead><tr><th>User</th><th>Admin</th><th>Active</th><th>Actions</th></tr></thead>
         <tbody>
           {% for u in users %}
             <tr>
               <td>{{ u['username'] }}</td>
               <td>{{ 'Yes' if u['is_admin'] else 'No' }}</td>
               <td>
+                <span class="badge" style="background: {{ 'var(--ok)' if u['active'] else 'var(--danger)' }}; color: #fff;">
+                    {{ 'Yes' if u['active'] else 'No' }}
+                </span>
+              </td>
+              <td>
+                <form method="post" style="display:inline;">
+                  <input type="hidden" name="action" value="toggle_active">
+                  <input type="hidden" name="user_id" value="{{ u['id'] }}">
+                  <button class="btn btn-sm btn-secondary" style="padding:2px 6px; font-size:0.8rem;">
+                      {{ 'Deactivate' if u['active'] else 'Activate' }}
+                  </button>
+                </form>
                 <form method="post" style="display:inline;" onsubmit="return confirm('Delete user {{ u['username'] }}? This cannot be undone.');">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="user_id" value="{{ u['id'] }}">
