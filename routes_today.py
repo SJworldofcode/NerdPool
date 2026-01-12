@@ -67,7 +67,6 @@ def compute_credits_all(rows, who_field: str = "who", cutoff_date: date = None):
     credits = defaultdict(int)
     by_day = defaultdict(dict)
     today_limit = date.today()
-    print(f"DEBUG: compute_credits_all start. today_limit={today_limit}, cutoff={cutoff_date}")
 
     for e in rows:
         d = day_to_date(e["day"])
@@ -78,11 +77,9 @@ def compute_credits_all(rows, who_field: str = "who", cutoff_date: date = None):
         # Rule: Only past days and today (calendar today).
         # Future dates should not change credits.
         if d > today_limit:
-            print(f"DEBUG: Skipping day {d} because > today_limit {today_limit}")
             continue
 
         if cutoff_date is not None and d > cutoff_date:
-            print(f"DEBUG: Skipping day {d} because > cutoff_date {cutoff_date}")
             continue
 
         roles = by_day[d]
@@ -91,16 +88,12 @@ def compute_credits_all(rows, who_field: str = "who", cutoff_date: date = None):
         
         # Rule: ONLY days with exactly 1 driver will be used to calc credits.
         if len(drivers) != 1:
-            print(f"DEBUG: Skipping day {d} because drivers count {len(drivers)} != 1")
             continue
             
-        print(f"DEBUG: Processing day {d}. Drivers: {drivers}, Riders: {riders}")
         for drv in drivers:
             credits[drv] += len(riders)
         for r in riders:
             credits[r] -= 1
-            
-    print(f"DEBUG: Final credits: {dict(credits)}")
     return dict(credits)
 # ----------------------------------------------
 
@@ -180,8 +173,6 @@ def switch():
     db = get_db()
     uid = int(current_user.id)
     cid_post = request.form.get("carpool_id")
-    print(f"DEBUG: Switch requested. Form: {request.form}")
-    print(f"DEBUG: cid_post type: {type(cid_post)}, value: {cid_post}")
     
     # Verify membership
     row = db.execute("""
@@ -194,10 +185,8 @@ def switch():
     if row:
         session["carpool_id"] = int(row["id"])
         session["carpool_name"] = row["name"]
-        print(f"DEBUG: Switch success. New CID in session: {session['carpool_id']} (type: {type(session['carpool_id'])})")
         flash(f"Switched to {row['name']}.")
     else:
-        print(f"DEBUG: Switch failed. CID {cid_post} not found or inactive for user {uid}.")
         flash(f"Invalid carpool selection.", "error")
         
     return redirect(url_for("todaybp.today"))
@@ -220,7 +209,6 @@ def today():
     )
 
     cid = session.get("carpool_id") if multi else None
-    print(f"DEBUG: Today route start. Session CID: {cid} (type: {type(cid)})")
     if multi and not cid:
         # Auto-select first if available, else show empty state
         first = db.execute("""
@@ -279,17 +267,14 @@ def today():
     # Save roles
     if request.method == "POST" and request.form.get("action") == "save_roles":
         if not can_edit:
-            print(f"DEBUG: Save rejected. can_edit={can_edit}")
             flash("Editing locked for days older than 7 days (admin only).", "error")
             return redirect(url_for("todaybp.today", day=selected_day.isoformat()))
 
-        print(f"DEBUG: save_roles POST form: {request.form}")
         if multi:
             posted = {}
             for m in members:
                 field = f"u{m['user_id']}"
                 val = request.form.get(field, "R")
-                print(f"DEBUG: Field {field} -> {val}")
                 posted[m["user_id"]] = val
         else:
             posted = {m["member_key"]: request.form.get(m["member_key"], "R") for m in members}
@@ -314,9 +299,7 @@ def today():
                     member_key = mk_row["member_key"]
                 else:
                     member_key = f"u{user_id}"
-                    print(f"WARNING: No member_key found for user {user_id} in carpool {cid}, using fallback: {member_key}")
                 
-                print(f"DEBUG: Inserting entry for user {user_id} with member_key '{member_key}'")
                 db.execute(
                     """
                     INSERT INTO entries(carpool_id, day, user_id, member_key, role, update_user, update_ts, update_date)
@@ -363,9 +346,7 @@ def today():
     # - Always include the selected day so the user sees the effect of their changes immediately.
     # - compute_credits_all will internally filter out any days > date.today() (calendar future),
     #   ensuring future plans don't affect the balance.
-    print(f"DEBUG: Processing credits for view day {selected_day}. Total rows fetched: {len(rows_prev)}")
     rows_filtered = [r for r in rows_prev if day_to_date(r["day"]) <= selected_day]
-    print(f"DEBUG: Rows after filtering <= {selected_day}: {len(rows_filtered)}")
     
     credits = compute_credits_all(rows_filtered, who_field="who", cutoff_date=None)
 
@@ -406,8 +387,6 @@ def today():
     else:
         members_ctx = [{"key": m["member_key"], "name": m["display_name"]} for m in members]
 
-    # Fetch options for navbar
-    carpool_options = []
     if multi:
         carpool_options = db.execute("""
             SELECT c.id, c.name
@@ -417,7 +396,6 @@ def today():
             ORDER BY c.name
         """, (uid,)).fetchall()
 
-    print(f"DEBUG: Today route end. Rendering with CID: {cid}, Session CID: {session.get('carpool_id')}")
     return render_template_string(
         TODAY_TMPL,
         selected_day=selected_day.isoformat(),
